@@ -14,6 +14,11 @@ name = "order-book-flux"
 path = "src/main.rs"
 required-features = ["std"]
 
+[[bin]]
+name = "backtest"
+path = "src/bin/backtest.rs"
+required-features = ["std"]
+
 [features]
 default = ["std"]
 std = ["dep:serde_json", "dep:ringbuf", "dep:core_affinity"]

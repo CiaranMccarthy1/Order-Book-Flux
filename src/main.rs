@@ -51,12 +51,20 @@ fn main() {
 
     let mut engine = OfiEngine::default();
     let mut processed = 0u64;
+    let mut parse_errors = 0u64;
     let start = Instant::now();
 
     while processed < 1_000_000 {
         if let Some(packet) = consumer.try_pop() {
-            let _ = engine.process_packet(&packet);
-            processed += 1;
+            match engine.process_packet(&packet) {
+                Ok(_) => processed += 1,
+                Err(e) => {
+                    parse_errors += 1;
+                    if parse_errors <= 5 {
+                        eprintln!("Parse error #{}: {}", parse_errors, e);
+                    }
+                }
+            }
         } else {
             core::hint::spin_loop();
         }
@@ -66,7 +74,9 @@ fn main() {
     let ns_per_tick = (elapsed.as_nanos() as f64) / (processed as f64);
 
     println!("Processed {} ticks", processed);
+    println!("Parse errors: {}", parse_errors);
     println!("Latest OFI signal: {}", engine.latest_signal());
+    println!("Top-5 imbalance: {}", engine.top5_snapshot_imbalance());
     println!("Tick-to-signal latency: {:.2} ns/tick", ns_per_tick);
 
     let _ = producer_thread.join();
