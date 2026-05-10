@@ -99,6 +99,81 @@ cargo bench --bench tick_to_signal
 
 Criterion reports throughput and timing statistics for the tick-to-signal path.
 
+## Latency benchmark harness
+
+The latency harness runs N independent runs and records per-iteration latency. Each run:
+
+- scrubs caches
+- seeds the order book (allocations occur before timing)
+- performs a warmup phase (default 10% of iterations)
+- captures per-iteration latency on the hot path only
+
+Run the harness:
+
+```powershell
+cargo run --release --bin benchmark -- --runs 50 --iterations 1000000 --pin-core 0
+```
+
+Key options:
+
+- `--runs N` or env `BENCH_RUNS`
+- `--iterations M` or env `BENCH_ITERATIONS`
+- `--warmup K`
+- `--pin-core ID`
+- `--use-rdtsc` (x86_64 only, requires stable CPU MHz)
+- `--max-acceptable-ns N` or env `BENCH_MAX_ACCEPTABLE_NS` (discard samples above N ns for clean stats)
+
+Output:
+
+- Raw CSV: `./benchmark_data/<timestamp>/raw.csv`
+- Summary JSON: `./benchmark_data/<timestamp>/summary.json`
+
+Example output (good, low-noise run):
+
+```
+Runs: 20
+Iterations per run: 1000000
+Mean: 132.45 ns
+Median: 131.92 ns
+StdDev: 6.12 ns
+Min: 120 ns
+Max: 210 ns
+P50: 131.92 ns
+P90: 139.80 ns
+P95: 145.20 ns
+P99: 160.10 ns
+P999: 190.00 ns
+Outliers > 10x median: 0
+```
+
+Clean vs outlier analysis:
+
+- Samples above `--max-acceptable-ns` are excluded from the clean distribution
+- Outlier distribution stats are printed separately for jitter analysis
+
+Example output (noisy run with jitter):
+
+```
+Runs: 20
+Iterations per run: 1000000
+Mean: 210.30 ns
+Median: 135.10 ns
+StdDev: 80.50 ns
+Min: 120 ns
+Max: 3500 ns
+P50: 135.10 ns
+P90: 190.00 ns
+P95: 230.00 ns
+P99: 800.00 ns
+P999: 2400.00 ns
+Outliers > 10x median: 1250
+```
+
+Notes:
+
+- CPU frequency locking attempts are best-effort; on Linux this requires sudo/root.
+- Thread migration and CPU frequency changes are reported as warnings.
+
 ## Notes on performance tuning
 
 - Prefer running with release mode and CPU frequency scaling disabled when benchmarking

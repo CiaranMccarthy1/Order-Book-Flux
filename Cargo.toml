@@ -19,9 +19,14 @@ name = "backtest"
 path = "src/bin/backtest.rs"
 required-features = ["std"]
 
+[[bin]]
+name = "benchmark"
+path = "src/bin/benchmark.rs"
+required-features = ["std"]
+
 [features]
 default = ["std"]
-std = ["dep:serde_json", "dep:ringbuf", "dep:core_affinity"]
+std = ["dep:serde_json", "dep:ringbuf", "dep:core_affinity", "dep:time"]
 simd-json = ["dep:simd-json", "std"]  # Opt-in SIMD JSON on AVX2/NEON hardware
 
 [dependencies]
@@ -30,6 +35,12 @@ serde_json = { version = "1.0", optional = true }
 simd-json = { version = "0.14", optional = true }  # SIMD-accelerated JSON; replaces serde_json on the hot path
 ringbuf = { version = "0.4", optional = true }
 core_affinity = { version = "0.8", optional = true }
+time = { version = "0.3", features = ["formatting"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+
 
 [dev-dependencies]
 criterion = "0.5"
