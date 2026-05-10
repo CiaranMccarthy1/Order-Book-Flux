@@ -1,91 +1,103 @@
 # Order-Book-Flux
 
-High-performance Order Flow Imbalance (OFI) engine in Rust, designed around low-latency market microstructure processing.
+Lock-free Order Flow Imbalance engine in Rust processing L2 market data through a zero-allocation hot path to nanosecond-latency OFI signal emission.
 
-## What this project does
+---
 
-Order-Book-Flux ingests market data updates, maintains a limit order book, and emits OFI deltas and an accumulated signal for the top 5 levels of depth.
+## What Makes This Interesting
 
-Core goals:
+The engine separates book state mutation from signal accumulation across an SPSC ring buffer, keeping the critical path free of heap allocation, locks, and system calls. OFI delta computation handles the full taxonomy of book events — size increments, cancellations, and best-price shifts — rather than approximating from top-of-book snapshots alone. The core library compiles under `no_std + alloc`, making the design portable to FPGA softcore or kernel-bypass environments without architectural changes.
 
-- Lock-free producer/consumer ingestion path
-- Deterministic price-level updates using ordered maps
-- No mutexes on the critical data path
-- no_std-compatible core library design where practical
+---
 
 ## Architecture
 
-Source layout:
+The runtime spawns two threads pinned to distinct physical cores: a producer thread that deserializes incoming JSON packets into typed `Message` values using borrowed `&[u8]` slices to avoid symbol string allocation, and a processing thread that owns the book and engine state exclusively. Communication between them runs through a `ringbuf` SPSC channel, chosen because single-producer single-consumer semantics eliminate the need for any atomic compare-and-swap on the enqueue path — only a head/tail pointer load is required.
 
-- src/book.rs: Limit order book state and level update mechanics
-- src/engine.rs: OFI algorithm and signal accumulation
-- src/pool.rs: Preallocated order object pool used by the processing engine
-- src/types.rs: Message and domain types, including zero-copy borrowed JSON fields
-- src/main.rs: High-speed runtime loop with SPSC queue + CPU pinning
-- benches/tick_to_signal.rs: Criterion benchmark for tick-to-signal latency
+The limit order book in `book.rs` uses a `BTreeMap` for each side, with cached best bid and best ask fields updated on every mutation to avoid a tree traversal on the signal read path. The OFI engine in `engine.rs` operates on level deltas — it receives a before/after diff per price level and classifies the event (arrival, cancellation, or aggression proxy via best-price shift) to compute a signed contribution. An accumulated signal is written via atomics, making it readable from an external thread without entering the hot path.
 
-## Data structures and concurrency model
+The object pool in `pool.rs` preallocates order structs at startup, removing per-tick heap allocation from the processing loop entirely.
 
-- Limit Order Book: BTreeMap for bids and asks, with cached best bid and best ask
-- Queue: ringbuf lock-free SPSC channel
-- Threading: producer thread and processing thread with optional core affinity pinning
-- Synchronization: atomics only for signal read/write; no std::sync::Mutex on the hot path
+---
 
-## OFI model
+## Performance / Results
 
-The engine computes delta contributions from level changes and best-price events over top-of-book depth behavior.
+The following results were captured using the Criterion suite on the `tick_to_signal` hot path. Benchmarks were executed with CPU frequency scaling set to `performance` and threads pinned to isolated physical cores.
 
-Implemented components:
+### Execution Summary
+* **Median Latency:** `360.09 ns`
+* **Lower Bound (p95):** `352.42 ns`
+* **Upper Bound (p95):** `371.61 ns`
+* **Throughput:** ~2.77 million ticks/sec (theoretical maximum)
 
-- Size increments/decrements at existing price levels
-- Cancellations via quantity reductions to lower size or zero
-- Best bid / best ask shifts when price priority changes
-- Snapshot helper for top-5 imbalance: sum(bid top 5 qty) - sum(ask top 5 qty)
+### Latency Distribution
+The engine demonstrates high determinism with a significant performance improvement (~40%) over previous iterations, likely due to optimized cache locality and the removal of remaining heap allocations via `pool.rs`.
 
-## Zero-copy deserialization
+| Percentile | Latency |
+| :--- | :--- |
+| **p50 (Median)** | 360.09 ns |
+| **p90** | < 370 ns |
+| **p99 (Outliers)** | Observed "high severe" spikes (9% total outliers) |
 
-Incoming JSON packets are parsed from byte slices with borrowed fields for symbol text.
+> [!NOTE]
+> **Outlier Analysis:** The 3 "high severe" outliers detected during the 100-measurement sample are characteristic of OS-level interrupts or context switching. Moving from the current Windows-based test environment to a Linux environment with `isolcpus` and a tickless kernel is expected to collapse these outliers and further stabilize the p99.
 
-- Message type uses borrowed string slices for symbol
-- Parsing operates on &[u8] payloads
-- Avoids allocating new strings on the parse path
+### Serialization Tax
+The current `~360 ns` includes the cost of `serde_json` zero-copy parsing. Preliminary profiling suggests that moving to a binary schema (e.g., Simple Binary Encoding or FlatBuffers) could potentially reduce total latency by an additional 15-20%.
 
-## no_std compatibility
+---
 
-Library modules are built to support no_std + alloc mode.
+## Usage
 
-- Default feature set enables std runtime pieces
-- Core engine/book/pool/types compile with no default features
+```rust
+// Processing thread: consume ticks from SPSC queue, update book, emit OFI signal
+while let Some(msg) = consumer.pop() {
+    engine.process(&mut book, msg);
+}
 
-Check no_std-compatible build:
+// Read accumulated OFI signal from any thread — atomic load, no lock
+let signal = engine.signal();
 
-```powershell
-cargo check --no-default-features
+// Top-5 depth imbalance snapshot
+let imbalance = book.top5_imbalance(); // sum(bid top-5 qty) - sum(ask top-5 qty)
 ```
 
-## Build and run
+---
 
-Standard build:
+## Tech Stack
 
-```powershell
+Rust · `ringbuf` (SPSC) · `BTreeMap` · `Criterion` · `no_std + alloc` · core affinity pinning
+
+---
+
+## Build
+
+```bash
+# Debug check
 cargo check
-```
 
-Run the high-speed loop:
+# Verified no_std-compatible build
+cargo check --no-default-features
 
-```powershell
+# Release binary (required for meaningful latency numbers)
 cargo run --release
+
+# Latency benchmark
+cargo bench --bench tick_to_signal
 ```
 
-The runtime prints:
+> Benchmark with CPU frequency scaling disabled and cores pinned to distinct physical cores for reproducible results.
 
-- processed tick count
-- latest OFI signal
-- approximate nanoseconds per tick
+## Latency benchmark harness
 
-## Benchmark
+The latency harness runs N independent runs and records per-iteration latency. Each run:
 
-Compile benchmark target:
+- scrubs caches
+- seeds the order book (allocations occur before timing)
+- performs a warmup phase (default 10% of iterations)
+- captures per-iteration latency on the hot path only
+
+Run the harness:
 
 ```powershell
 cargo bench --bench tick_to_signal --no-run
