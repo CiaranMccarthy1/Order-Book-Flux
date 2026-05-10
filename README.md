@@ -34,7 +34,7 @@ Measured on Windows 11, Ryzen 5 5600X, pinned core 0, 50 independent runs x 1M i
 Tail latency: 0.001% of samples exceed 5 us (OS interrupts, scheduler jitter). These are excluded from clean distribution stats. See benchmark methodology below.
 
 > [!NOTE]
-> These are single-threaded, synthetic measurements - best case, no network, no serialization, no contention. Real market data adds parse time, cache pressure, and branch mispredicts. The 47 ns is an upper bound on what is possible, not a promise of production performance.
+> These are single-threaded, synthetic measurements - best case, no network, no serialization, no contention. Real market data adds parse time, cache pressure, and branch mispredicts. The 47 ns is an upper bound on what is possible.
 
 ## Usage
 
