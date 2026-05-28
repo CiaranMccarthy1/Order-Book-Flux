@@ -1,16 +1,25 @@
 #![cfg(feature = "std")]
 
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use core_affinity::CoreId;
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::HeapRb;
 
+use order_book_flux::connections::{stream_binance_depth_with_handler, ExchangeConfig};
 use order_book_flux::engine::OfiEngine;
+use order_book_flux::types::Side;
 
 fn pin_current_thread(core_id: CoreId) {
     let _ = core_affinity::set_for_current(core_id);
+}
+
+#[derive(Copy, Clone, Debug)]
+struct LevelUpdate {
+    side: Side,
+    price: u64,
+    qty: u64,
 }
 
 fn main() {
@@ -22,62 +31,48 @@ fn main() {
         pin_current_thread(core);
     }
 
-    let rb = HeapRb::<Vec<u8>>::new(1 << 14);
+    let rb = HeapRb::<LevelUpdate>::new(1 << 14);
     let (mut producer, mut consumer) = rb.split();
 
-    let producer_thread = thread::spawn(move || {
+    let _producer_thread = thread::spawn(move || {
         if let Some(core) = producer_core {
             pin_current_thread(core);
         }
 
-        for i in 0..1_000_000u64 {
-            let mut packet = if i % 2 == 0 {
-                br#"{"symbol":"XBTUSD","side":"ask","price":50001,"qty":8,"ts_nanos":2}"#.to_vec()
-            } else {
-                br#"{"symbol":"XBTUSD","side":"bid","price":50000,"qty":10,"ts_nanos":1}"#.to_vec()
-            };
-
+        let config = ExchangeConfig::default();
+        if let Err(err) = stream_binance_depth_with_handler(config, |side, price, qty| {
+            let mut update = LevelUpdate { side, price, qty };
             loop {
-                match producer.try_push(packet) {
+                match producer.try_push(update) {
                     Ok(()) => break,
-                    Err(returned_packet) => {
-                        packet = returned_packet;
+                    Err(returned_update) => {
+                        update = returned_update;
                         core::hint::spin_loop();
                     }
                 }
             }
+        }) {
+            eprintln!("Binance stream error: {}", err);
         }
     });
 
     let mut engine = OfiEngine::default();
     let mut processed = 0u64;
-    let mut parse_errors = 0u64;
-    let start = Instant::now();
+    let mut last_report = Instant::now();
 
-    while processed < 1_000_000 {
-        if let Some(packet) = consumer.try_pop() {
-            match engine.process_packet(&packet) {
-                Ok(_) => processed += 1,
-                Err(e) => {
-                    parse_errors += 1;
-                    if parse_errors <= 5 {
-                        eprintln!("Parse error #{}: {}", parse_errors, e);
-                    }
-                }
-            }
+    loop {
+        if let Some(update) = consumer.try_pop() {
+            engine.process_level_update(update.side, update.price, update.qty);
+            processed += 1;
         } else {
             core::hint::spin_loop();
         }
+
+        if last_report.elapsed() >= Duration::from_secs(5) {
+            println!("Processed {} updates", processed);
+            println!("Latest OFI signal: {}", engine.latest_signal());
+            println!("Top-5 imbalance: {}", engine.top5_snapshot_imbalance());
+            last_report = Instant::now();
+        }
     }
-
-    let elapsed = start.elapsed();
-    let ns_per_tick = (elapsed.as_nanos() as f64) / (processed as f64);
-
-    println!("Processed {} ticks", processed);
-    println!("Parse errors: {}", parse_errors);
-    println!("Latest OFI signal: {}", engine.latest_signal());
-    println!("Top-5 imbalance: {}", engine.top5_snapshot_imbalance());
-    println!("Tick-to-signal latency: {:.2} ns/tick", ns_per_tick);
-
-    let _ = producer_thread.join();
 }

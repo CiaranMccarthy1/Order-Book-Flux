@@ -4,17 +4,17 @@ Rust order book exploring lock-free concurrency and nanosecond-scale latency mea
 
 ## What It Does
 
-A single-producer, single-consumer pipeline: one thread ingests market data, another mutates a BTreeMap-backed order book and computes order flow imbalance (OFI). The two threads communicate through an SPSC ring buffer. The core library is `no_std + alloc` compatible. The hot path avoids allocations when price levels are pre-seeded.
+A single-producer, single-consumer pipeline: one thread ingests market data, another mutates a BTreeMap-backed order book and computes order flow imbalance (OFI). The two threads communicate through an SPSC ring buffer. The core library is `no_std + alloc` compatible. The hot path avoids allocations when price levels are pre-seeded. The `std` binary now supports live Binance depth streaming.
 
 The OFI engine classifies book events (arrivals, cancellations, best-price shifts) and accumulates a signed signal readable via atomic load from any thread.
 
 ## Architecture
 
 ```
-[Network/JSON] -> [Producer] --SPSC ringbuf--> [Consumer: book + OFI engine] -> [Signal]
+[Binance WebSocket] -> [Producer] --SPSC ringbuf--> [Consumer: book + OFI engine] -> [Signal]
 ```
 
-- Producer: Deserializes JSON into `&[u8]`-borrowed message structs, avoiding per-symbol string allocation.
+- Producer: Binance WebSocket client parses JSON diffs and converts decimal strings into scaled integer prices and sizes.
 - SPSC channel: `ringbuf` crate - single head/tail pointer loads, no CAS on enqueue.
 - Book: `BTreeMap` per side with cached best bid/ask to skip tree traversal on reads.
 - Engine: Level-delta OFI model, updates the signal atomically.
@@ -40,8 +40,8 @@ Tail latency: 0.001% of samples exceed 5 us (OS interrupts, scheduler jitter). T
 
 ```rust
 // Processing thread
-while let Some(packet) = consumer.pop() {
-    engine.process_packet(&packet)?;
+while let Some(update) = consumer.pop() {
+    engine.process_level_update(update.side, update.price, update.qty);
 }
 
 // Read signal from anywhere - atomic load, no lock
@@ -54,9 +54,17 @@ let imbalance = engine.top5_snapshot_imbalance();
 ```bash
 cargo check                          # debug
 cargo check --no-default-features    # no_std verification
-cargo run --release                  # release binary
+cargo run --release                  # live Binance feed
 cargo bench --bench tick_to_signal   # Criterion benchmark
+cargo bench --bench binance_feed     # Criterion benchmark (sample Binance payloads)
 ```
+
+## Live Feed Notes
+
+- `cargo run --release` connects to Binance depth via WebSocket and prints stats every 5 seconds.
+- Default symbol is `BTCUSDT`. You can change it in `ExchangeConfig::default()` in the `std` binary.
+- Default WebSocket URL is `wss://fstream.binance.com/public/ws/btcusdt@depth`.
+- Prices and sizes are scaled into integers (default: price scale 2, size scale 8).
 
 ## Benchmarking
 
@@ -64,6 +72,12 @@ Custom harness for statistical rigor:
 
 ```powershell
 cargo run --release --bin benchmark -- --runs 50 --iterations 1000000 --pin-core 0 --max-acceptable-ns 5000 --use-rdtsc
+```
+
+Live Binance benchmark:
+
+```powershell
+cargo run --release --bin benchmark -- --binance --iterations 100000 --warmup 10000
 ```
 
 What it does:

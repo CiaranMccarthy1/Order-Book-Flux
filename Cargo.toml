@@ -26,7 +26,7 @@ required-features = ["std"]
 
 [features]
 default = ["std"]
-std = ["dep:serde_json", "dep:ringbuf", "dep:core_affinity", "dep:time"]
+std = ["dep:serde_json", "dep:ringbuf", "dep:core_affinity", "dep:time", "dep:tungstenite", "dep:url", "dep:reqwest"]
 simd-json = ["dep:simd-json", "std"]  # Opt-in SIMD JSON on AVX2/NEON hardware
 
 [dependencies]
@@ -36,6 +36,9 @@ simd-json = { version = "0.14", optional = true }  # SIMD-accelerated JSON; repl
 ringbuf = { version = "0.4", optional = true }
 core_affinity = { version = "0.8", optional = true }
 time = { version = "0.3", features = ["formatting"], optional = true }
+tungstenite = { version = "0.20", optional = true }
+url = { version = "2", optional = true }
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
@@ -47,4 +50,8 @@ criterion = "0.5"
 
 [[bench]]
 name = "tick_to_signal"
+harness = false
+
+[[bench]]
+name = "binance_feed"
 harness = false

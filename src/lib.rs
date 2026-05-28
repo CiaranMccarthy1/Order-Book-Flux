@@ -3,6 +3,8 @@
 extern crate alloc;
 
 pub mod book;
+#[cfg(feature = "std")]
+pub mod connections;
 pub mod engine;
 pub mod mock;
 pub mod risk;
