@@ -1,6 +1,7 @@
 #![cfg(feature = "std")]
 
 use std::env;
+use std::cell::Cell;
 use std::time::Instant;
 
 use order_book_flux::connections::{apply_binance_payload, ExchangeConfig};
@@ -153,10 +154,10 @@ fn stream_binance_latencies(
 
     let mut latencies = Vec::with_capacity(iterations as usize);
     let mut seen = 0u64;
-    let mut done = false;
+    let done = Cell::new(false);
 
     let mut handler = |side: Side, price: u64, qty: u64| {
-        if done {
+        if done.get() {
             return false;
         }
 
@@ -167,7 +168,7 @@ fn stream_binance_latencies(
         if seen >= warmup {
             latencies.push(ns);
             if latencies.len() as u64 >= iterations {
-                done = true;
+                done.set(true);
                 return false;
             }
         }
@@ -176,7 +177,7 @@ fn stream_binance_latencies(
         true
     };
 
-    while !done {
+    while !done.get() {
         match socket.read_message()? {
             Message::Text(text) => {
                 apply_binance_payload(config, text.as_bytes(), last_update_id, &mut handler)?;
