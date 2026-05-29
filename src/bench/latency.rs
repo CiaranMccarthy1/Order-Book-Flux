@@ -2,7 +2,12 @@
 
 use std::env;
 use std::cell::Cell;
-use std::time::Instant;
+
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::{_mm_lfence, _rdtsc};
+
+// 4.7 GHz
+const CPU_FREQ_HZ: f64 = 4_700_000_000.0;
 
 use order_book_flux::connections::{apply_binance_payload, ExchangeConfig};
 use order_book_flux::engine::OfiEngine;
@@ -116,16 +121,27 @@ fn run_synthetic(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
         engine.process_level_update(side, price, qty);
     }
 
-    let mut latencies = Vec::with_capacity(config.iterations as usize);
+    let mut latencies_cycles = Vec::with_capacity(config.iterations as usize);
     for _ in 0..config.iterations {
         let (side, price, qty) = random_update(&mut rng);
-        let start = Instant::now();
+        let start_cycles = unsafe {
+            _mm_lfence();
+            _rdtsc()
+        };
         engine.process_level_update(side, price, qty);
-        let ns = start.elapsed().as_nanos() as u64;
-        latencies.push(ns);
+        let end_cycles = unsafe {
+            _mm_lfence();
+            _rdtsc()
+        };
+        latencies_cycles.push(end_cycles - start_cycles);
     }
 
-    print_stats("Synthetic", &latencies);
+    let latencies_ns: Vec<u64> = latencies_cycles
+        .into_iter()
+        .map(|cycles| ((cycles as f64 / CPU_FREQ_HZ) * 1_000_000_000.0) as u64)
+        .collect();
+
+    print_stats("Synthetic", &latencies_ns);
     Ok(())
 }
 
@@ -152,7 +168,7 @@ fn stream_binance_latencies(
     let url = Url::parse(&config.url)?;
     let (mut socket, _response) = connect(url)?;
 
-    let mut latencies = Vec::with_capacity(iterations as usize);
+    let mut latencies_cycles = Vec::with_capacity(iterations as usize);
     let mut seen = 0u64;
     let done = Cell::new(false);
 
@@ -161,13 +177,19 @@ fn stream_binance_latencies(
             return false;
         }
 
-        let start = Instant::now();
+        let start_cycles = unsafe {
+            _mm_lfence();
+            _rdtsc()
+        };
         engine.process_level_update(side, price, qty);
-        let ns = start.elapsed().as_nanos() as u64;
+        let end_cycles = unsafe {
+            _mm_lfence();
+            _rdtsc()
+        };
 
         if seen >= warmup {
-            latencies.push(ns);
-            if latencies.len() as u64 >= iterations {
+            latencies_cycles.push(end_cycles - start_cycles);
+            if latencies_cycles.len() as u64 >= iterations {
                 done.set(true);
                 return false;
             }
@@ -194,7 +216,12 @@ fn stream_binance_latencies(
         }
     }
 
-    Ok(latencies)
+    let latencies_ns: Vec<u64> = latencies_cycles
+        .into_iter()
+        .map(|cycles| ((cycles as f64 / CPU_FREQ_HZ) * 1_000_000_000.0) as u64)
+        .collect();
+
+    Ok(latencies_ns)
 }
 
 fn random_update(rng: &mut Lcg) -> (Side, u64, u64) {
