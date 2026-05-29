@@ -70,8 +70,8 @@ cargo bench --bench binance_feed     # Criterion benchmark (sample Binance paylo
 
 Custom harness for statistical rigor:
 
-```powershell
-cargo run --release --bin benchmark -- --runs 50 --iterations 1000000 --pin-core 0 --max-acceptable-ns 5000 --use-rdtsc
+```Terminal
+ cargo run --release --bin benchmark -- --iterations 1000000
 ```
 
 Live Binance benchmark:

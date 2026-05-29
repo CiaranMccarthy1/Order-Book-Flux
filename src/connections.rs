@@ -1,10 +1,14 @@
 #![cfg(feature = "std")]
 
+use serde::de::IgnoredAny;
 use serde::Deserialize;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::header::HeaderValue;
 use tungstenite::{connect, Message};
 use url::Url;
+
+#[cfg(feature = "simd-json")]
+use simd_json;
 
 use crate::engine::OfiEngine;
 use crate::types::Side;
@@ -170,6 +174,16 @@ struct BinanceDepthUpdate {
     asks: Vec<[String; 2]>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DepthUpdateMessage {
+    Update(BinanceDepthUpdate),
+    Wrapped { data: BinanceDepthUpdate },
+    Error { code: i64, msg: String },
+    Ack { result: Option<IgnoredAny>, id: Option<u64> },
+    Other(IgnoredAny),
+}
+
 /// Connects to Binance depth stream, seeds a REST snapshot, then applies diffs into the engine.
 pub fn stream_binance_depth(
     engine: &mut OfiEngine,
@@ -305,26 +319,29 @@ fn parse_binance_snapshot(payload: &[u8]) -> Result<BinanceSnapshot, StreamError
 }
 
 fn parse_depth_update(payload: &[u8]) -> Result<Option<BinanceDepthUpdate>, StreamError> {
-    let value: serde_json::Value = serde_json::from_slice(payload)?;
+    #[cfg(feature = "simd-json")]
+    let message: DepthUpdateMessage = {
+        let mut buf = payload.to_vec();
+        simd_json::from_slice(&mut buf).map_err(|err| {
+            StreamError::Json(serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
+            )))
+        })?
+    };
 
-    if let (Some(code), Some(msg)) = (value.get("code"), value.get("msg")) {
-        return Err(StreamError::Binance(format!(
+    #[cfg(not(feature = "simd-json"))]
+    let message: DepthUpdateMessage = serde_json::from_slice(payload)?;
+
+    match message {
+        DepthUpdateMessage::Update(update) => Ok(Some(update)),
+        DepthUpdateMessage::Wrapped { data } => Ok(Some(data)),
+        DepthUpdateMessage::Error { code, msg } => Err(StreamError::Binance(format!(
             "{}: {}",
             code, msg
-        )));
+        ))),
+        DepthUpdateMessage::Ack { .. } | DepthUpdateMessage::Other(_) => Ok(None),
     }
-
-    if let Some(data) = value.get("data") {
-        let update: BinanceDepthUpdate = serde_json::from_value(data.clone())?;
-        return Ok(Some(update));
-    }
-
-    if value.get("e").is_some() {
-        let update: BinanceDepthUpdate = serde_json::from_value(value)?;
-        return Ok(Some(update));
-    }
-
-    Ok(None)
 }
 
 fn apply_binance_snapshot<F>(
