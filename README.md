@@ -32,6 +32,26 @@ Measured on Linux, Ryzen 5 5600X, pinned core 0, 50 independent runs x 1M iterat
 | Min | 12 ns |
 | Max | 26699 ns |
 
+> synthetic tick_to_signal:
+>
+> ```
+> tick_to_signal_ns       
+> time: 
+> Lower Bound 1.1805 us
+> Point Estimate 1.2051 us
+> Upper Bound 1.2334 us
+> ```
+>
+> binance_payload_to_engine:
+>
+> ```
+> binance_payload_to_engine
+> time: 
+> Lower Bound 2.0913 us 
+> Point Estimate 2.0950 us
+> Upper Bound 2.0994 us
+> ```
+
 Tail latency: occasional spikes up to 26.7 us (interrupts, scheduler jitter). These are excluded from clean distribution stats. See benchmark methodology below.
 
 ## Usage
