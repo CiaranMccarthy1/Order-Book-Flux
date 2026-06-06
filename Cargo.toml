@@ -36,7 +36,7 @@ simd-json = { version = "0.14", optional = true }  # SIMD-accelerated JSON; repl
 ringbuf = { version = "0.4", optional = true }
 core_affinity = { version = "0.8", optional = true }
 time = { version = "0.3", features = ["formatting"], optional = true }
-tungstenite = { version = "0.20", optional = true }
+tungstenite = { version = "0.20", features = ["native-tls"], optional = true }
 url = { version = "2", optional = true }
 reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
 

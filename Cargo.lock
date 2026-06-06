@@ -1820,6 +1820,7 @@ dependencies = [
  "http 0.2.12",
  "httparse",
  "log",
+ "native-tls",
  "rand",
  "sha1",
  "thiserror",

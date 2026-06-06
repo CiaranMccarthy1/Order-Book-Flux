@@ -13,7 +13,7 @@ use simd_json;
 use crate::engine::OfiEngine;
 use crate::types::Side;
 
-const DEFAULT_WS_URL: &str = "wss://fstream.binance.com/public/ws/btcusdt@depth";
+const DEFAULT_WS_URL: &str = "wss://stream.binance.com:9443/ws/btcusdt@depth";
 const DEFAULT_REST_URL: &str = "https://api.binance.com";
 const DEFAULT_ORIGIN: &str = "";
 
@@ -36,7 +36,7 @@ impl ExchangeConfig {
             symbol,
             price_scale: 2,
             size_scale: 8,
-            url: format!("wss://fstream.binance.com/public/ws/{}", stream),
+            url: format!("wss://stream.binance.com:9443/ws/{}", stream),
             rest_url: DEFAULT_REST_URL.to_string(),
             stream,
             origin: DEFAULT_ORIGIN.to_string(),
@@ -194,7 +194,7 @@ pub fn stream_binance_depth(
     })
 }
 
-/// Seeds a Binance REST snapshot, then streams depth updates into a handler.
+/// Streams Binance depth updates handling the snapshot logic internally.
 pub fn stream_binance_depth_with_handler<F>(
     config: ExchangeConfig,
     mut on_update: F,
@@ -202,48 +202,15 @@ pub fn stream_binance_depth_with_handler<F>(
 where
     F: FnMut(Side, u64, u64),
 {
-    let mut handler = |side, price, qty| {
-        on_update(side, price, qty);
-        true
-    };
-    let mut last_update_id = seed_binance_snapshot(&config, &mut handler)?;
-    stream_binance_depth_until(config, &mut last_update_id, handler)
-}
-
-/// Fetches the Binance REST snapshot and applies it to the handler.
-pub fn seed_binance_snapshot<F>(
-    config: &ExchangeConfig,
-    on_update: &mut F,
-) -> Result<u64, StreamError>
-where
-    F: FnMut(Side, u64, u64) -> bool,
-{
-    let snapshot = fetch_binance_snapshot(config)?;
-    if !apply_binance_snapshot(&snapshot, config, on_update)? {
-        return Err(StreamError::HandlerStopped);
-    }
-    Ok(snapshot.last_update_id)
-}
-
-/// Streams Binance depth diffs until the handler returns false.
-pub fn stream_binance_depth_until<F>(
-    config: ExchangeConfig,
-    last_update_id: &mut u64,
-    mut on_update: F,
-) -> Result<(), StreamError>
-where
-    F: FnMut(Side, u64, u64) -> bool,
-{
     let url = Url::parse(&config.url)?;
     let mut request = url.into_client_request()?;
-    request
-        .headers_mut()
-        .insert("User-Agent", HeaderValue::from_static("order-book-flux"));
     if !config.origin.is_empty() {
         request
             .headers_mut()
             .insert("Origin", HeaderValue::from_str(&config.origin)?);
     }
+    
+    // 1. Connect to WebSocket first to start buffering updates
     let (mut socket, _response) = connect(request)?;
 
     if needs_subscribe(&config) {
@@ -255,28 +222,46 @@ where
         socket.send(Message::Text(subscribe.to_string()))?;
     }
 
+    let mut handler = |side, price, qty| {
+        on_update(side, price, qty);
+        true
+    };
+
+    // 2. Fetch the REST snapshot while the WebSocket builds up buffered events
+    let snapshot = fetch_binance_snapshot(&config)?;
+    if !apply_binance_snapshot(&snapshot, &config, &mut handler)? {
+        return Err(StreamError::HandlerStopped);
+    }
+    
+    let mut last_update_id = snapshot.last_update_id;
+
+    // 3. Process events from the WebSocket stream
     loop {
-        match socket.read_message()? {
-            Message::Text(text) => {
+        match socket.read() {
+            Ok(Message::Text(text)) => {
                 if let Some(update) = parse_depth_update(text.as_bytes())? {
-                    if !apply_depth_update(&config, update, last_update_id, &mut on_update)? {
+                    if !apply_depth_update(&config, update, &mut last_update_id, &mut handler)? {
                         break;
                     }
                 }
             }
-            Message::Binary(bytes) => {
+            Ok(Message::Binary(bytes)) => {
                 if let Some(update) = parse_depth_update(&bytes)? {
-                    if !apply_depth_update(&config, update, last_update_id, &mut on_update)? {
+                    if !apply_depth_update(&config, update, &mut last_update_id, &mut handler)? {
                         break;
                     }
                 }
             }
-            Message::Ping(payload) => {
+            Ok(Message::Ping(payload)) => {
                 socket.send(Message::Pong(payload))?;
             }
-            Message::Pong(_) => {}
-            Message::Close(_) => break,
-            _ => {}
+            Ok(Message::Pong(_)) => {}
+            Ok(Message::Close(_)) => break,
+            Ok(Message::Frame(_)) => {}
+            Err(tungstenite::Error::Io(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(err) => return Err(StreamError::WebSocket(err)),
         }
     }
 
@@ -519,11 +504,19 @@ mod tests {
             };
 
             apply_binance_snapshot(&snapshot, &config, &mut handler).unwrap();
-            assert_eq!(updates.len(), 2);
-            assert_eq!(updates[0], (Side::Bid, 5_000_001, 1_234));
-            assert_eq!(updates[1], (Side::Ask, 5_000_002, 2_500));
+        }
 
-            updates.clear();
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0], (Side::Bid, 5_000_001, 1_234));
+        assert_eq!(updates[1], (Side::Ask, 5_000_002, 2_500));
+
+        updates.clear();
+        {
+            let mut handler = |side, price, qty| {
+                updates.push((side, price, qty));
+                true
+            };
+
             apply_binance_payload(&config, diff, &mut last_update_id, &mut handler).unwrap();
         }
 
