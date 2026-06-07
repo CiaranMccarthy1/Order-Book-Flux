@@ -122,6 +122,7 @@ fn main() {
                     }
                 }
             }
+            true
         }) {
             eprintln!("Binance stream error: {}", err);
         }

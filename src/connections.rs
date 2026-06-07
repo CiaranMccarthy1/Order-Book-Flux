@@ -191,6 +191,7 @@ pub fn stream_binance_depth(
 ) -> Result<(), StreamError> {
     stream_binance_depth_with_handler(config, |side, price, qty| {
         engine.process_level_update(side, price, qty);
+        true
     })
 }
 
@@ -200,7 +201,7 @@ pub fn stream_binance_depth_with_handler<F>(
     mut on_update: F,
 ) -> Result<(), StreamError>
 where
-    F: FnMut(Side, u64, u64),
+    F: FnMut(Side, u64, u64) -> bool,
 {
     let url = Url::parse(&config.url)?;
     let mut request = url.into_client_request()?;
@@ -223,8 +224,7 @@ where
     }
 
     let mut handler = |side, price, qty| {
-        on_update(side, price, qty);
-        true
+        on_update(side, price, qty)
     };
 
     // 2. Fetch the REST snapshot while the WebSocket builds up buffered events
