@@ -7,8 +7,7 @@ use tungstenite::http::header::HeaderValue;
 use tungstenite::{connect, Message};
 use url::Url;
 
-#[cfg(feature = "simd-json")]
-use simd_json;
+
 
 use crate::engine::OfiEngine;
 use crate::types::Side;
@@ -304,18 +303,6 @@ fn parse_binance_snapshot(payload: &[u8]) -> Result<BinanceSnapshot, StreamError
 }
 
 fn parse_depth_update(payload: &[u8]) -> Result<Option<BinanceDepthUpdate>, StreamError> {
-    #[cfg(feature = "simd-json")]
-    let message: DepthUpdateMessage = {
-        let mut buf = payload.to_vec();
-        simd_json::from_slice(&mut buf).map_err(|err| {
-            StreamError::Json(serde_json::Error::io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                err.to_string(),
-            )))
-        })?
-    };
-
-    #[cfg(not(feature = "simd-json"))]
     let message: DepthUpdateMessage = serde_json::from_slice(payload)?;
 
     match message {
@@ -460,11 +447,7 @@ fn parse_decimal_to_u64(input: &str, scale: u32) -> Result<u64, ParseDecimalErro
 }
 
 fn pow10(scale: u32) -> Result<u64, ParseDecimalError> {
-    let mut value = 1u64;
-    for _ in 0..scale {
-        value = value.checked_mul(10).ok_or(ParseDecimalError::Overflow)?;
-    }
-    Ok(value)
+    10u64.checked_pow(scale).ok_or(ParseDecimalError::Overflow)
 }
 
 #[cfg(test)]

@@ -1,7 +1,5 @@
 #[cfg(feature = "std")]
 use serde_json;
-#[cfg(feature = "simd-json")]
-use simd_json;
 
 use crate::book::{LevelChange, LimitOrderBook};
 #[cfg(feature = "std")]
@@ -62,24 +60,11 @@ impl OfiEngine {
     }
 
     /// Deserialise and ingest one raw WebSocket frame.
-    /// Uses simd-json when the feature is enabled (AVX2/NEON path),
-    /// falls back to serde_json otherwise.
     #[cfg(feature = "std")]
     #[inline]
     pub fn process_packet(&mut self, payload: &[u8]) -> Result<i64, serde_json::Error> {
-        // simd-json requires a mutable buffer (it writes in-place during parsing).
-        #[cfg(feature = "simd-json")]
-        {
-            let mut buf = payload.to_vec();
-            let msg: MarketDataMessage<'_> = simd_json::from_slice(&mut buf)
-                .map_err(|e| serde_json::Error::io(std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())))?;
-            return Ok(self.process_level_update(msg.side, msg.price, msg.qty));
-        }
-        #[cfg(not(feature = "simd-json"))]
-        {
-            let msg: MarketDataMessage<'_> = serde_json::from_slice(payload)?;
-            Ok(self.process_level_update(msg.side, msg.price, msg.qty))
-        }
+        let msg: MarketDataMessage<'_> = serde_json::from_slice(payload)?;
+        Ok(self.process_level_update(msg.side, msg.price, msg.qty))
     }
 
     #[inline]

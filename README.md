@@ -88,20 +88,6 @@ cargo bench --bench binance_feed     # Criterion benchmark (sample Binance paylo
 - Default WebSocket URL is `wss://fstream.binance.com/public/ws/btcusdt@depth`.
 - Prices and sizes are scaled into integers (default: price scale 2, size scale 8).
 
-## Benchmarking
-
-Custom harness:
-
-```bash
-cargo run --release --bin benchmark -- --iterations 1000000
-```
-
-Live Binance benchmark:
-
-```bash
-cargo run --release --bin benchmark -- --binance --iterations 100000 --warmup 10000
-```
-
 What it does:
 
 - Single run with warmup iterations, then timing each update.
