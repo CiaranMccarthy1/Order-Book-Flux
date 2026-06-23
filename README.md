@@ -2,7 +2,6 @@
 
 A high-performance Binance order book with Order Flow Imbalance (OFI) signal computation.
 
-**Key improvement:** Switched from sliding window (Vec) to `BTreeMap` for unbounded price levels. Eliminates recentering `.fill(0)` clears and data loss risk.
 
 ## Build
 
@@ -26,16 +25,6 @@ Output shows 5-second snapshots:
 - **Spread**: Mid-market spread
 - **Best Bid/Ask**: Current best prices
 
-### In Code
-```rust
-use order_book_flux::engine::OfiEngine;
-use order_book_flux::types::Side;
-
-let mut engine = OfiEngine::new();
-let delta = engine.process_level_update(Side::Bid, 50000, 100);
-let imb = engine.top5_snapshot_imbalance();
-```
-
 ## Architecture
 
 | Module | Purpose |
@@ -54,8 +43,6 @@ cargo test --lib engine     # OFI signal tests
 cargo test                  # Full suite (47 tests)
 ```
 
-All tests pass. Includes regression test: `no_data_loss_across_price_ranges`.
-
 ## Benchmarking
 
 ```bash
@@ -63,7 +50,6 @@ cargo bench --bench tick_to_signal    # Single update: ~1.7 µs
 cargo bench --bench binance_feed         # Typical payload: ~2.1 µs per level
 ```
 
-No recentering spikes. Smooth O(log N) latency profile.
 
 ## Performance
 
