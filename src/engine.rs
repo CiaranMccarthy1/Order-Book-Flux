@@ -14,16 +14,12 @@ pub struct OfiEngine {
 
 impl OfiEngine {
     pub fn new() -> Self {
-        Self {
-            book: LimitOrderBook::new(),
-            top_depth: 5,
-            latest_signal: 0,
-        }
+        Self::with_depth(5) 
     }
 
     pub fn with_depth(top_depth: usize) -> Self {
         Self {
-            book: LimitOrderBook::new(),
+            book: LimitOrderBook::with_depth(top_depth),
             top_depth,
             latest_signal: 0,
         }
@@ -36,10 +32,11 @@ impl OfiEngine {
 
     #[inline]
     pub fn top5_snapshot_imbalance(&self) -> i64 {
-        let bid = self.book.top_n_sum(Side::Bid, self.top_depth) as i64;
-        let ask = self.book.top_n_sum(Side::Ask, self.top_depth) as i64;
-        bid - ask
-    }
+    let depth = self.book.depth(); 
+    let bid = self.book.top_n_sum(Side::Bid, depth) as i64;
+    let ask = self.book.top_n_sum(Side::Ask, depth) as i64;
+    bid - ask
+}
 
     #[inline]
     pub fn best_bid(&self) -> Option<(crate::types::Price, crate::types::Quantity)> {

@@ -14,19 +14,31 @@ pub struct LevelChange {
     pub is_top_n: bool,
 }
 
-#[derive(Default)]
 pub struct LimitOrderBook {
     bids: BTreeMap<Price, Quantity>,
     asks: BTreeMap<Price, Quantity>,
+    depth: usize,
 }
 
 impl LimitOrderBook {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_depth(5)
+    }
+
+    pub fn with_depth(depth: usize) -> Self {
+        Self {
+            bids: BTreeMap::new(),
+            asks: BTreeMap::new(),
+            depth,
+        }
+    }
+
+    pub fn depth(&self) -> usize {
+        self.depth
     }
 
     pub fn with_window(_base_price: Price, _tick_size: Price) -> Self {
-        Self::new()
+        Self::with_depth(5)
     }
 
     #[inline]
@@ -76,7 +88,7 @@ impl LimitOrderBook {
             Side::Ask => self.best_ask().map(|(p, _)| p),
         };
 
-        let was_top_n = self.is_in_top_n(side, price, 5);
+        let was_top_n = self.is_in_top_n(side, price, self.depth);
 
         let map = match side {
             Side::Bid => &mut self.bids,
@@ -96,7 +108,7 @@ impl LimitOrderBook {
             Side::Ask => self.best_ask().map(|(p, _)| p),
         };
 
-        let is_top_n = self.is_in_top_n(side, price, 5);
+        let is_top_n = self.is_in_top_n(side, price, self.depth);
 
         LevelChange {
             side,

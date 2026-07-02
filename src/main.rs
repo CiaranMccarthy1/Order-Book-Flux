@@ -51,7 +51,8 @@ fn main() {
         }
     });
 
-    let mut engine = OfiEngine::default();
+    let depth = 20;
+    let mut engine = OfiEngine::with_depth(depth);
     let mut processed = 0u64;
     let mut last_report = Instant::now();
     let mut last_signal = engine.latest_signal();
@@ -76,7 +77,7 @@ fn main() {
             if !printed_header {
                 println!(
                     "{:>W_UPDATE$} │ {:>W_OFI$} │ {:>W_DELTA$} │ {:>W_TOP5$} │ {:>W_SPREAD$} │ {:>W_BEST$}",
-                    "Update#", "OFI Signal", "Signal Δ", "Top-5 Imb", "Spread", "Best Bid/Ask"
+                    "Update#", "OFI Signal", "Signal Δ", "Top-N Imb", "Spread", "Best Bid/Ask"
                 );
                 println!(
                     "{}┼{}┼{}┼{}┼{}┼{}",
